@@ -75,29 +75,32 @@ def custom_openapi():
     components = openapi_schema.setdefault("components", {})
     security_schemes = components.setdefault("securitySchemes", {})
 
+    token_url = f"https://login.microsoftonline.com/{settings.azure_tenant_id}/oauth2/v2.0/token"
+    security_schemes["azureAD"] = {
+        "type": "oauth2",
+        "description": (
+            "Azure AD OAuth2 client credentials. "
+            "In mock mode you can enter placeholder client id/secret and any bearer token."
+        ),
+        "flows": {
+            "clientCredentials": {
+                "tokenUrl": token_url,
+                "scopes": {
+                    "api.readwrite": "Full API access for authorized clients.",
+                },
+            }
+        },
+    }
+
     if settings.use_mock_mode:
         security_schemes["bearerAuth"] = {
             "type": "http",
             "scheme": "bearer",
             "bearerFormat": "JWT",
-            "description": "Paste any bearer token for mock mode (e.g., 'mock-token').",
+            "description": "Optional shortcut when testing mock mode (e.g., use 'mock-token').",
         }
-        openapi_schema["security"] = [{"bearerAuth": []}]
-    else:
-        token_url = f"https://login.microsoftonline.com/{settings.azure_tenant_id}/oauth2/v2.0/token"
-        security_schemes["azureAD"] = {
-            "type": "oauth2",
-            "description": "Azure AD OAuth2 client credentials",
-            "flows": {
-                "clientCredentials": {
-                    "tokenUrl": token_url,
-                    "scopes": {
-                        "api.readwrite": "Full API access for authorized clients.",
-                    },
-                }
-            },
-        }
-        openapi_schema["security"] = [{"azureAD": ["api.readwrite"]}]
+
+    openapi_schema["security"] = [{"azureAD": ["api.readwrite"]}]
 
     app.openapi_schema = openapi_schema
     return app.openapi_schema
