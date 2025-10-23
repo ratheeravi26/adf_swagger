@@ -18,14 +18,20 @@ setup_logging(settings)
 
 logger = logging.getLogger(__name__)
 
+oauth_config = None
+if settings.use_mock_mode:
+    oauth_config = {"usePkceWithAuthorizationCodeGrant": True}
+else:
+    oauth_config = {
+        "clientId": settings.azure_client_id,
+        "usePkceWithAuthorizationCodeGrant": True,
+    }
+
 app = FastAPI(
     title="Azure Data Factory Control API",
     description="Management endpoints for controlling Azure Data Factory pipelines.",
     version="1.0.0",
-    swagger_ui_init_oauth={
-        "clientId": settings.azure_client_id,
-        "usePkceWithAuthorizationCodeGrant": True,
-    },
+    swagger_ui_init_oauth=oauth_config,
     swagger_ui_oauth2_redirect_url="/docs/oauth2-redirect",
 )
 
@@ -75,23 +81,6 @@ def custom_openapi():
     components = openapi_schema.setdefault("components", {})
     security_schemes = components.setdefault("securitySchemes", {})
 
-    token_url = f"https://login.microsoftonline.com/{settings.azure_tenant_id}/oauth2/v2.0/token"
-    security_schemes["azureAD"] = {
-        "type": "oauth2",
-        "description": (
-            "Azure AD OAuth2 client credentials. "
-            "In mock mode you can enter placeholder client id/secret and any bearer token."
-        ),
-        "flows": {
-            "clientCredentials": {
-                "tokenUrl": token_url,
-                "scopes": {
-                    "api.readwrite": "Full API access for authorized clients.",
-                },
-            }
-        },
-    }
-
     if settings.use_mock_mode:
         security_schemes["bearerAuth"] = {
             "type": "http",
@@ -99,8 +88,22 @@ def custom_openapi():
             "bearerFormat": "JWT",
             "description": "Optional shortcut when testing mock mode (e.g., use 'mock-token').",
         }
-
-    openapi_schema["security"] = [{"azureAD": ["api.readwrite"]}]
+        openapi_schema["security"] = [{"bearerAuth": []}]
+    else:
+        token_url = f"https://login.microsoftonline.com/{settings.azure_tenant_id}/oauth2/v2.0/token"
+        security_schemes["azureAD"] = {
+            "type": "oauth2",
+            "description": "Azure AD OAuth2 client credentials.",
+            "flows": {
+                "clientCredentials": {
+                    "tokenUrl": token_url,
+                    "scopes": {
+                        "api.readwrite": "Full API access for authorized clients.",
+                    },
+                }
+            },
+        }
+        openapi_schema["security"] = [{"azureAD": ["api.readwrite"]}]
 
     app.openapi_schema = openapi_schema
     return app.openapi_schema
