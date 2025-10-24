@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from typing import Dict, List
 
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
@@ -81,6 +82,8 @@ def custom_openapi():
     components = openapi_schema.setdefault("components", {})
     security_schemes = components.setdefault("securitySchemes", {})
 
+    security_requirements: List[Dict[str, List[str]]] = []
+
     if settings.use_mock_mode:
         security_schemes["bearerAuth"] = {
             "type": "http",
@@ -88,22 +91,28 @@ def custom_openapi():
             "bearerFormat": "JWT",
             "description": "Optional shortcut when testing mock mode (e.g., use 'mock-token').",
         }
-        openapi_schema["security"] = [{"bearerAuth": []}]
-    else:
-        token_url = f"https://login.microsoftonline.com/{settings.azure_tenant_id}/oauth2/v2.0/token"
-        security_schemes["azureAD"] = {
-            "type": "oauth2",
-            "description": "Azure AD OAuth2 client credentials.",
-            "flows": {
-                "clientCredentials": {
-                    "tokenUrl": token_url,
-                    "scopes": {
-                        "api.readwrite": "Full API access for authorized clients.",
-                    },
-                }
-            },
-        }
-        openapi_schema["security"] = [{"azureAD": ["api.readwrite"]}]
+        security_requirements.append({"bearerAuth": []})
+
+    token_url = f"https://login.microsoftonline.com/{settings.azure_tenant_id}/oauth2/v2.0/token"
+    security_schemes["azureAD"] = {
+        "type": "oauth2",
+        "description": "Azure AD OAuth2 client credentials.",
+        "flows": {
+            "clientCredentials": {
+                "tokenUrl": token_url,
+                "scopes": {
+                    "api.readwrite": "Full API access for authorized clients.",
+                },
+            }
+        },
+    }
+    if not settings.auth_auto_client and not settings.use_mock_mode:
+        security_requirements.append({"azureAD": ["api.readwrite"]})
+
+    if security_requirements:
+        openapi_schema["security"] = security_requirements
+    elif "security" in openapi_schema:
+        openapi_schema["security"] = []
 
     app.openapi_schema = openapi_schema
     return app.openapi_schema

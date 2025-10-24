@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     auth_audience: Optional[str] = Field(None, env="AUTH_AUDIENCE")
     auth_scope: Optional[str] = Field(None, env="AUTH_SCOPE")
     auth_use_mock: bool = Field(False, env="AUTH_USE_MOCK")
+    auth_auto_client: bool = Field(False, env="AUTH_AUTO_CLIENT")
 
     default_run_lookback_hours: int = Field(24, env="DEFAULT_RUN_LOOKBACK_HOURS")
     azure_mock_mode: bool = Field(False, env="ADF_MOCK_MODE")
@@ -67,6 +68,13 @@ class Settings(BaseSettings):
             return ["*"]
         # Support comma-separated origin list
         return [origin.strip() for origin in self.allow_origins.split(",") if origin.strip()]
+
+    @property
+    def effective_auth_scope(self) -> str:
+        """Scope used for Azure AD client credential flows."""
+        if self.auth_scope:
+            return self.auth_scope
+        return f"{self.management_endpoint}/.default"
 
     @field_validator("azure_environment")
     def _normalize_env(cls, value: str) -> str:

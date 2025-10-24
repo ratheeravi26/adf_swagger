@@ -5,7 +5,7 @@ from __future__ import annotations
 import base64
 import json
 import logging
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException, Request, status
 from fastapi.security.utils import get_authorization_scheme_param
@@ -46,8 +46,7 @@ class AzureADTokenValidator:
                 client_credential=self._settings.azure_client_secret,
             )
 
-            scope = self._settings.auth_scope or f"api://{self._settings.azure_client_id}/.default"
-            self._scopes = [scope]
+            self._scopes = [self._settings.effective_auth_scope]
 
     def validate(self, token: str) -> Dict[str, Any]:
         if self._settings.auth_use_mock:
@@ -87,6 +86,34 @@ class AzureADTokenValidator:
             )
 
         return claims
+
+    def acquire_service_identity(self) -> Tuple[Dict[str, Any], str]:
+        """Obtain service credentials for internal calls when headers are absent."""
+        if self._settings.auth_use_mock:
+            token = "mock-token"
+            claims = {"sub": "mock-service", "scp": "mock", "aud": "mock"}
+            return claims, token
+
+        if self._app is None:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Authentication service is not configured.",
+            )
+
+        result = self._app.acquire_token_for_client(scopes=self._scopes)
+        if "access_token" not in result:
+            logger.error(
+                "Azure AD client credential request failed",
+                extra={"error": result.get("error"), "error_description": result.get("error_description")},
+            )
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="Unable to authorize service request with Azure AD.",
+            )
+
+        token = result["access_token"]
+        claims = _decode_token_claims(token)
+        return claims, token
 
 
 class AzureADAuthMiddleware(BaseHTTPMiddleware):
@@ -130,6 +157,12 @@ class AzureADAuthMiddleware(BaseHTTPMiddleware):
         auth_header = request.headers.get("Authorization")
         scheme, token = get_authorization_scheme_param(auth_header)
         if scheme.lower() != "bearer" or not token:
+            if self._settings.auth_use_mock or self._settings.auth_auto_client:
+                claims, service_token = await run_in_threadpool(self._validator.acquire_service_identity)
+                request.state.user = claims
+                request.state.service_token = service_token
+                return await call_next(request)
+
             raise HTTPException(
                 status_code=status.HTTP_401_UNAUTHORIZED,
                 detail="Missing or invalid Authorization header",
